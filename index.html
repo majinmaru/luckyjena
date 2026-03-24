@@ -61,7 +61,7 @@
 
   .ticket{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;transition:border-color .2s;}
   .ticket:hover{border-color:rgba(245,200,66,0.3);}
-  .ticket.won{border-color:rgba(245,200,66,0.6);}
+  .ticket.expanded{border-color:rgba(245,200,66,0.6);}
   .ticket-header{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;background:var(--surface2);gap:10px;}
   .ticket-nums{display:flex;gap:5px;flex-wrap:wrap;flex:1;}
   .mini-ball{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:10px;font-weight:700;flex-shrink:0;}
@@ -213,6 +213,7 @@
 <div id="page-tickets" class="page">
   <div class="tickets-toolbar">
     <span class="ticket-count-badge" id="ticket-count-badge">총 0개</span>
+    <button class="btn btn-danger" style="font-size:12px;padding:8px 12px" onclick="askDeleteAll()">전체 삭제</button>
     <select class="sort-select" id="sort-select" onchange="currentPage=1;renderTickets()">
       <option value="recent-update">최근 업데이트순</option>
       <option value="reg-newest">등록 최신순</option>
@@ -303,8 +304,8 @@
 
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
-    <div class="confirm-title">🗑️ 티켓 삭제</div>
-    <div class="confirm-msg">이 티켓을 삭제할까요?<br>삭제 후 복구할 수 없어요.</div>
+    <div class="confirm-title" id="confirm-title">🗑️ 티켓 삭제</div>
+    <div class="confirm-msg" id="confirm-msg">이 티켓을 삭제할까요?<br>삭제 후 복구할 수 없어요.</div>
     <div class="confirm-btns">
       <button class="btn btn-outline" onclick="closeConfirm()">취소</button>
       <button class="btn btn-danger" onclick="confirmDelete()">삭제하기</button>
@@ -430,8 +431,8 @@ async function initStatsData(force = false) {
     const d = statsCache.updatedAt
       ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR')
       : '업데이트 시각 없음';
-    updateStatusUI('ok', `${statsCache.latestDrwNo}회차 기준 · 전체 ${statsCache.totalDraws}회차 · ${d}`);
-    showToast(force ? '✅ 저장소의 최신 data 파일을 다시 불러왔어요' : '✅ 데이터 파일 로드 완료!');
+    updateStatusUI('ok', getUpdateStatusText(statsCache.latestDrwNo));
+    showToast(force ? '✅ 데이터 업데이트 완료' : '✅ 데이터 로드 완료');
   } catch(err) {
     console.error('[initStatsData]', err);
     if (statsCache.freq && statsCache.totalDraws > 0) {
@@ -449,9 +450,9 @@ async function initStatsData(force = false) {
 function loadStatsFromCache() {
   if (statsCache.freq && statsCache.totalDraws > 0) {
     const d = statsCache.updatedAt ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR') : '-';
-    updateStatusUI('ok', `${statsCache.latestDrwNo}회차 기준 · 전체 ${statsCache.totalDraws}회차 · ${d}`);
+    updateStatusUI('ok', getUpdateStatusText(statsCache.latestDrwNo));
   } else {
-    updateStatusUI('warn', '저장된 data 파일 없음 · 아래 버튼으로 data 파일을 다시 불러오세요');
+    updateStatusUI('warn', `데이터 없음 · ${getCurrentKstLabel()} · 업데이트 필요`);
   }
 }
 async function refreshDrawData() {
@@ -608,7 +609,7 @@ function saveTicket() {
 // ─────────────────────────────────────────
 //  TICKETS LIST
 // ─────────────────────────────────────────
-let currentPage = 1, currentTicketId = null, pendingDeleteId = null;
+let currentPage = 1, currentTicketId = null, pendingDeleteId = null, pendingDeleteMode = 'single', expandedTicketId = null;
 const PAGE_SIZE = 10;
 
 function getSorted() {
@@ -691,8 +692,8 @@ function ticketCard(t) {
     ? `<div id="ow-${t.id}" class="hidden">${oW.map(w=>`<div class="history-row"><span>${w.date}</span><span class="badge badge-won">${w.rank}등</span></div>`).join('')}</div>
        <button class="expand-btn" onclick="toggle('ow-${t.id}',this)"><span>이전 당첨 이력 ${oW.length}건</span><span class="expand-icon">▼</span></button>` : '';
   return `
-  <div class="ticket${hasWins?' won':''}" id="tk-${t.id}">
-    <div class="ticket-header" onclick="toggle('tb-${t.id}',this)">
+  <div class="ticket${expandedTicketId===t.id?' expanded':''}" id="tk-${t.id}">
+    <div class="ticket-header" onclick="toggleTicket('${t.id}')">
       <div class="ticket-nums">${ballsHtml}</div>
       <div class="ticket-meta">
         <div style="margin-bottom:4px"><span class="badge badge-count">${t.purchases.length}회 구매</span></div>
@@ -700,7 +701,7 @@ function ticketCard(t) {
       </div>
     </div>
     ${winStrip}
-    <div id="tb-${t.id}" class="hidden">
+    <div id="tb-${t.id}" class="${expandedTicketId===t.id?'':'hidden'}">
       <div class="ticket-body">
         <div class="section-label">구매 이력</div>
         <div class="history-row">
@@ -728,11 +729,44 @@ function toggle(id, btn) {
   if (ic) ic.classList.toggle('open');
 }
 
-function askDelete(id) { pendingDeleteId = id; document.getElementById('confirm-overlay').classList.add('open'); }
-function closeConfirm() { pendingDeleteId = null; document.getElementById('confirm-overlay').classList.remove('open'); }
+function toggleTicket(id) {
+  expandedTicketId = expandedTicketId === id ? null : id;
+  renderTickets();
+}
+
+function askDelete(id) {
+  pendingDeleteMode = 'single';
+  pendingDeleteId = id;
+  document.getElementById('confirm-title').textContent = '🗑️ 티켓 삭제';
+  document.getElementById('confirm-msg').innerHTML = '이 티켓을 삭제할까요?<br>삭제 후 복구할 수 없어요.';
+  document.getElementById('confirm-overlay').classList.add('open');
+}
+function askDeleteAll() {
+  if (!tickets.length) { showToast('삭제할 티켓이 없어요'); return; }
+  pendingDeleteMode = 'all';
+  pendingDeleteId = null;
+  document.getElementById('confirm-title').textContent = '🗑️ 전체 삭제';
+  document.getElementById('confirm-msg').innerHTML = `티켓 ${tickets.length}개를 모두 삭제할까요?<br>삭제 후 복구할 수 없어요.`;
+  document.getElementById('confirm-overlay').classList.add('open');
+}
+function closeConfirm() {
+  pendingDeleteId = null;
+  pendingDeleteMode = 'single';
+  document.getElementById('confirm-overlay').classList.remove('open');
+}
 function confirmDelete() {
+  if (pendingDeleteMode === 'all') {
+    tickets = [];
+    expandedTicketId = null;
+    closeConfirm();
+    currentPage = 1;
+    persistTickets(); renderTickets();
+    showToast('티켓 전체가 삭제됐어요');
+    return;
+  }
   if (!pendingDeleteId) return;
   tickets = tickets.filter(t => t.id !== pendingDeleteId);
+  if (expandedTicketId === pendingDeleteId) expandedTicketId = null;
   pendingDeleteId = null;
   document.getElementById('confirm-overlay').classList.remove('open');
   const tp = Math.ceil(tickets.length / PAGE_SIZE);
@@ -966,9 +1000,9 @@ function renderProbResult(id) {
       <div class="data-status" id="data-status">
         <div style="display:flex;align-items:center;gap:8px">
           <span class="status-dot ok" id="status-dot"></span>
-          <span id="status-text" style="font-size:12px;color:var(--text2)">${statsCache.latestDrwNo}회차 기준 · 전체 ${totalDraws}회차 · ${d} 업데이트</span>
+          <span id="status-text" style="font-size:12px;color:var(--text2)">${getUpdateStatusText(statsCache.latestDrwNo)}</span>
         </div>
-        <button class="btn-load" style="padding:5px 12px;font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text3)" onclick="checkAndRefresh()">↻ data 다시 불러오기</button>
+        <button class="btn-load" style="padding:5px 12px;font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text3)" onclick="checkAndRefresh()">↻ 업데이트</button>
       </div>
 
       <div class="prob-display">
@@ -1050,14 +1084,21 @@ function getCurrentKstLabel() {
   return `${y}-${m}-${d}`;
 }
 
+function getUpdateStatusText(latestDrwNo) {
+  const currentLatest = Number(latestDrwNo || 0);
+  const expectedLatest = getExpectedLatestDrawKST();
+  const status = currentLatest >= expectedLatest ? '최신' : '업데이트 필요';
+  return `${currentLatest}회차 기준 · ${getCurrentKstLabel()} · ${status}`;
+}
+
 // 업데이트 버튼 — 이미 최신이면 안내, 아니면 로드
 async function checkAndRefresh() {
   const expectedLatest = getExpectedLatestDrawKST();
   const currentLatest = Number(statsCache.latestDrwNo || 0);
 
   if (currentLatest >= expectedLatest) {
-    showToast(`이미 한국시간 기준 이번 토요일 최신 데이터(${currentLatest}회차)까지 있어요. 다시 불러올 필요가 없어요.`);
-    updateStatusUI('ok', `${currentLatest}회차 기준 · 한국시간 ${getCurrentKstLabel()} 확인 · 추가 불러오기 불필요`);
+    showToast(`이미 최신 데이터예요. (${currentLatest}회차)`);
+    updateStatusUI('ok', getUpdateStatusText(currentLatest));
     return;
   }
 
@@ -1067,7 +1108,7 @@ async function checkAndRefresh() {
 
   const afterLatest = Number(statsCache.latestDrwNo || 0);
   if (afterLatest <= beforeLatest) {
-    showToast('아직 이번 토요일 기준으로 추가된 최신 data 파일이 없어요. 나중에 다시 확인해 주세요.');
+    showToast('아직 새 업데이트가 없어요.');
   }
 }
 // ─────────────────────────────────────────
