@@ -1037,8 +1037,8 @@ function renderProbResult(id) {
       ${numProbs.map(({ n, p, count }) => `
         <div class="prob-history-item">
           <span style="display:flex;align-items:center;gap:8px">
-            <div class="mini-ball ${colorClass(n)}" style="width:24px;height:24px;font-size:9px;flex-shrink:0">${n}</div>
-            <span style="font-size:13px">${n}</span> <span style="color:var(--text3);font-size:11px">(${count}회 출현)</span>
+            <div class="mini-ball ${colorClass(n)}" style="width:24px;height:24px;font-size:13px;flex-shrink:0">${n}</div>
+            <span style="color:var(--text3);font-size:11px">(${count}회 출현)</span>
           </span>
           <span style="font-family:'Space Mono',monospace;color:var(--gold)">${p.toFixed(4)}%</span>
         </div>`).join('')}
