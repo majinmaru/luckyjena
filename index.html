@@ -315,13 +315,8 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const STATIC_DATA_BASE = './data';
 
-async function fetchJson(path) {
-  const res = await fetch(path, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
+const DATA_BASE = './data';
 
 // ─────────────────────────────────────────
 //  TICKETS  (localStorage: lotto_tickets)
@@ -340,97 +335,125 @@ function persistTickets() {
 }
 
 // ─────────────────────────────────────────
-//  STATS CACHE  (localStorage: lotto_stats)
-//  { freq:{1:N..45:N}, totalDraws, latestDrwNo, updatedAt }
-//  크기: ~500B  (원본 방식 대비 약 1/500)
+//  STATIC DATA CACHE
+//  GitHub Pages용: data/history.json, data/stats.json, data/latest.json 사용
 // ─────────────────────────────────────────
 let statsCache = { freq: null, winNums: [], totalDraws: 0, latestDrwNo: 0, updatedAt: null };
+let historyCache = [];
 try {
   const s = localStorage.getItem('lotto_stats');
   if (s) statsCache = JSON.parse(s);
+} catch(e) {}
+try {
+  const h = localStorage.getItem('lotto_history');
+  if (h) historyCache = JSON.parse(h);
 } catch(e) {}
 
 function persistStats() {
   try { localStorage.setItem('lotto_stats', JSON.stringify(statsCache)); } catch(e) {}
 }
+function persistHistory() {
+  try { localStorage.setItem('lotto_history', JSON.stringify(historyCache)); } catch(e) {}
+}
 
 // ─────────────────────────────────────────
-//  STATS INIT & UPDATE
-//  전략: 클라이언트가 50회차씩 페이지 나눠 호출
-//        서버는 매번 50회차만 처리 → 타임아웃 없음
-//        freq를 클라이언트에서 누적 → localStorage 캐싱
+//  STATIC DATA HELPERS
 // ─────────────────────────────────────────
-async function initStatsData(forceReload = false) {
+async function fetchJson(path, force = false) {
+  const url = force ? `${path}?v=${Date.now()}` : path;
+  const res = await fetch(url, { cache: force ? 'no-store' : 'default' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+function normalizeHistoryPayload(raw) {
+  const arr = Array.isArray(raw) ? raw : (raw?.draws || []);
+  return arr
+    .map(d => ({
+      drwNo: Number(d.drwNo),
+      drwNoDate: d.drwNoDate,
+      nums: Array.isArray(d.nums)
+        ? d.nums.map(Number).sort((a,b)=>a-b)
+        : [d.drwtNo1,d.drwtNo2,d.drwtNo3,d.drwtNo4,d.drwtNo5,d.drwtNo6].map(Number).sort((a,b)=>a-b),
+      bonusNo: Number(d.bonusNo ?? d.bnusNo ?? 0),
+    }))
+    .filter(d => d.drwNo && d.nums.length === 6);
+}
+function normalizeStatsPayload(raw, history) {
+  if (raw?.freq && raw?.totalDraws) {
+    return {
+      freq: raw.freq,
+      winNums: Array.isArray(raw.winNums) ? raw.winNums.map(d => ({
+        drwNo: Number(d.drwNo),
+        drwNoDate: d.drwNoDate,
+        nums: [...d.nums].map(Number).sort((a,b)=>a-b),
+        bonusNo: Number(d.bonusNo ?? 0),
+      })) : history.map(d => ({...d})),
+      totalDraws: Number(raw.totalDraws),
+      latestDrwNo: Number(raw.latestDrwNo || 0),
+      updatedAt: raw.updatedAt || null,
+    };
+  }
+
+  const freq = {};
+  for (let i = 1; i <= 45; i++) freq[i] = 0;
+  history.forEach(draw => draw.nums.forEach(n => { freq[n] = (freq[n] || 0) + 1; }));
+  return {
+    freq,
+    winNums: history.map(d => ({...d})),
+    totalDraws: history.length,
+    latestDrwNo: history.length ? Math.max(...history.map(d => d.drwNo)) : 0,
+    updatedAt: raw?.updatedAt || null,
+  };
+}
+async function initStatsData(force = false) {
+  showLoadOverlay(true, force ? '저장소의 최신 데이터 파일을 다시 불러오는 중...' : '저장된 데이터 파일 확인 중...');
   updateStatusUI('loading', '데이터 확인 중...');
   try {
-    const latestMeta = await fetchJson(`${STATIC_DATA_BASE}/latest.json`);
-    const statsData = await fetchJson(`${STATIC_DATA_BASE}/stats.json`);
-    const latestDrwNo = latestMeta.latestDrwNo || statsData.latestDrwNo;
+    const [latestRaw, statsRaw, historyRaw] = await Promise.all([
+      fetchJson(`${DATA_BASE}/latest.json`, force),
+      fetchJson(`${DATA_BASE}/stats.json`, force),
+      fetchJson(`${DATA_BASE}/history.json`, force),
+    ]);
 
-    statsCache = {
-      freq: statsData.freq || {},
-      winNums: statsData.winNums || [],
-      totalDraws: statsData.totalDraws || 0,
-      latestDrwNo,
-      updatedAt: statsData.updatedAt || Date.now(),
-    };
+    historyCache = normalizeHistoryPayload(historyRaw);
+    persistHistory();
+
+    statsCache = normalizeStatsPayload(statsRaw, historyCache);
+    if (latestRaw?.latestDrwNo) statsCache.latestDrwNo = Number(latestRaw.latestDrwNo);
+    if (latestRaw?.updatedAt && !statsCache.updatedAt) statsCache.updatedAt = latestRaw.updatedAt;
     persistStats();
 
-    const d = new Date(statsCache.updatedAt).toLocaleDateString('ko-KR');
-    updateStatusUI('ok', `${latestDrwNo}회차 최신 · 전체 ${statsCache.totalDraws}회차 · ${d} 업데이트`);
-    if (forceReload) showToast('✅ GitHub 데이터 동기화 완료!');
-  } catch (err) {
-    console.error('[initStats]', err);
-    if (statsCache.freq) {
-      const d = statsCache.updatedAt ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR') : '-';
-      updateStatusUI('warn', `캐시 데이터 사용 중 · ${statsCache.latestDrwNo}회차까지 · ${d}`);
+    if (!statsCache.totalDraws) {
+      throw new Error('data 파일에 당첨 이력이 아직 없습니다');
+    }
+
+    const d = statsCache.updatedAt
+      ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR')
+      : '업데이트 시각 없음';
+    updateStatusUI('ok', `${statsCache.latestDrwNo}회차 기준 · 전체 ${statsCache.totalDraws}회차 · ${d}`);
+    showToast(force ? '✅ 저장소의 최신 data 파일을 다시 불러왔어요' : '✅ 데이터 파일 로드 완료!');
+  } catch(err) {
+    console.error('[initStatsData]', err);
+    if (statsCache.freq && statsCache.totalDraws > 0) {
+      const d = statsCache.updatedAt
+        ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR')
+        : '캐시 사용';
+      updateStatusUI('warn', `저장소 로드 실패 · 로컬 캐시 사용 중 · ${statsCache.latestDrwNo}회차 · ${d}`);
     } else {
-      updateStatusUI('err', `데이터 로드 실패: ${err.message}`);
+      updateStatusUI('err', `data 파일 로드 실패: ${err.message}`);
     }
   } finally {
     showLoadOverlay(false);
   }
 }
-
-// 접속 시: 캐시 있으면 바로 상태 표시, 없으면 업데이트 안내만
 function loadStatsFromCache() {
   if (statsCache.freq && statsCache.totalDraws > 0) {
-    const d = new Date(statsCache.updatedAt).toLocaleDateString('ko-KR');
-    const nextSat = getNextSaturdayStr();
-    const isUpToDate = statsCache.latestDrwNo >= estimatedLatestDrwNo();
-    if (isUpToDate) {
-      updateStatusUI('ok', `${statsCache.latestDrwNo}회차 최신 · ${d} 업데이트 · 다음 추첨 ${nextSat}`);
-    } else {
-      updateStatusUI('warn', `새 회차 있음 · ↻ 업데이트 버튼을 눌러주세요`);
-    }
+    const d = statsCache.updatedAt ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR') : '-';
+    updateStatusUI('ok', `${statsCache.latestDrwNo}회차 기준 · 전체 ${statsCache.totalDraws}회차 · ${d}`);
   } else {
-    updateStatusUI('warn', '데이터 없음 · GitHub 저장소의 data 폴더를 먼저 생성해주세요');
+    updateStatusUI('warn', '저장된 data 파일 없음 · 아래 버튼으로 data 파일을 다시 불러오세요');
   }
 }
-
-// 다음 토요일 날짜 문자열 반환
-function getNextSaturdayStr() {
-  const now = new Date(Date.now() + 9 * 3600 * 1000); // KST
-  const day = now.getUTCDay();
-  const daysUntilSat = day === 6 ? 7 : (6 - day);
-  const nextSat = new Date(now.getTime() + daysUntilSat * 24 * 3600 * 1000);
-  return `${nextSat.getUTCMonth() + 1}/${nextSat.getUTCDate()}(토)`;
-}
-
-// 날짜 기반 현재 최신 회차 추정 (API 호출 없음)
-function estimatedLatestDrwNo() {
-  const first   = Date.UTC(2002, 11, 7, 11, 40);
-  const nowUTC  = Date.now();
-  const kstNow  = nowUTC + 9 * 3600 * 1000;
-  const todayKST = new Date(kstNow);
-  const dow     = todayKST.getUTCDay();
-  const hour    = todayKST.getUTCHours();
-  const min     = todayKST.getUTCMinutes();
-  const drawDone = dow !== 6 || hour > 20 || (hour === 20 && min >= 50);
-  const weeks   = Math.floor((kstNow - first) / (7 * 24 * 3600 * 1000));
-  return drawDone ? weeks + 1 : weeks;
-}
-
 async function refreshDrawData() {
   await checkAndRefresh();
 }
@@ -468,7 +491,9 @@ function init() {
   );
   renderTickets();
   loadStatsFromCache();
-  initStatsData();
+  if (!(statsCache.freq && statsCache.totalDraws > 0)) {
+    initStatsData(false).catch(() => {});
+  }
 }
 
 // ─────────────────────────────────────────
@@ -870,68 +895,73 @@ function selectProbTicket(id) {
 }
 
 // 확률 결과 렌더
+
 function renderProbResult(id) {
   const t        = tickets.find(x => x.id === id);
   const area     = document.getElementById('prob-result-area');
   const hasStats = !!(statsCache.freq && statsCache.totalDraws > 0);
+  const hasHistory = Array.isArray(historyCache) && historyCache.length > 0;
 
-  // 데이터 없으면 안내 박스
-  if (!hasStats) {
+  if (!hasStats || !hasHistory) {
     area.innerHTML = `
       <div class="card">
         <div class="no-data-box">
           <div class="no-data-icon">📡</div>
           <div class="no-data-msg">
-            확률 계산을 위해 저장소의 <code>data/latest.json</code>과 <code>data/stats.json</code>이 필요해요.<br>
-            GitHub Actions를 한 번 실행하거나 저장소에 포함된 예시 데이터를 사용하세요.<br>
-            <span style="font-size:11px;color:var(--text3)">정적 파일 기반이라 GitHub Pages에서도 바로 동작해요.</span>
+            확률 계산을 위해 저장소의 data 파일이 필요해요.<br>
+            아래 버튼을 눌러 <code>data/history.json</code>, <code>data/stats.json</code>을 다시 불러오세요.<br>
+            <span style="font-size:11px;color:var(--text3)">GitHub Actions가 history.json을 갱신하면 이 버튼으로 최신 내용을 다시 읽어올 수 있어요.</span>
           </div>
           <button class="btn-load" id="btn-load-data" onclick="startLoadData()">
-            🔄 data 파일 다시 불러오기
+            📥 data 파일 다시 불러오기
           </button>
         </div>
       </div>`;
     return;
   }
 
-  // 확률 계산
   const totalDraws = statsCache.totalDraws;
-  let prob = 1;
-  const numProbs = [];
-  t.nums.forEach(n => {
-    const p = statsCache.freq[n] / totalDraws;
-    numProbs.push({ n, p: p * 100, count: statsCache.freq[n] });
-    prob *= p;
+  const numProbs = t.nums.map(n => {
+    const count = Number(statsCache.freq[n] || 0);
+    const p = totalDraws ? (count / totalDraws) : 0;
+    return { n, p: p * 100, count };
   });
-  const probPct = (prob * 100).toFixed(7);
 
-  // 당첨 이력 (캐시에서 즉시)
-  const targetKey = [...t.nums].sort((a, b) => a - b).join(',');
-  const matches   = (statsCache.winNums || []).filter(w =>
-    [...w.nums].sort((a, b) => a - b).join(',') === targetKey
-  );
+  const exactKey = [...t.nums].sort((a,b)=>a-b).join(',');
+  const exactMatches = historyCache.filter(d => d.nums.join(',') === exactKey);
 
-  const d = new Date(statsCache.updatedAt).toLocaleDateString('ko-KR');
+  const compareRows = historyCache.map(draw => {
+    const matchCount = t.nums.filter(n => draw.nums.includes(n)).length;
+    const bonusMatch = draw.bonusNo && t.nums.includes(draw.bonusNo);
+    return { ...draw, matchCount, bonusMatch };
+  }).filter(r => r.matchCount > 0);
+
+  compareRows.sort((a, b) => {
+    if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+    if ((b.bonusMatch?1:0) !== (a.bonusMatch?1:0)) return (b.bonusMatch?1:0) - (a.bonusMatch?1:0);
+    return b.drwNo - a.drwNo;
+  });
+
+  const bestRows = compareRows.slice(0, 5);
+  const comboProb = (1 / 8145060) * 100;
+  const d = statsCache.updatedAt ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR') : '-';
 
   area.innerHTML = `
     <div class="card">
-      <!-- 데이터 상태 -->
       <div class="data-status" id="data-status">
         <div style="display:flex;align-items:center;gap:8px">
           <span class="status-dot ok" id="status-dot"></span>
-          <span id="status-text" style="font-size:12px;color:var(--text2)">${statsCache.latestDrwNo}회차 기준 · ${totalDraws}회차 · ${d} 업데이트</span>
+          <span id="status-text" style="font-size:12px;color:var(--text2)">${statsCache.latestDrwNo}회차 기준 · 전체 ${totalDraws}회차 · ${d} 업데이트</span>
         </div>
-        <button class="btn-load" style="padding:5px 12px;font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text3)" onclick="checkAndRefresh()">↻ 업데이트</button>
+        <button class="btn-load" style="padding:5px 12px;font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text3)" onclick="checkAndRefresh()">↻ data 다시 불러오기</button>
       </div>
 
-      <!-- 조합 당첨확률 -->
       <div class="prob-display">
-        <div class="prob-num">${probPct}%</div>
-        <div class="prob-label">이 번호 조합의 추정 당첨 확률 (전체 ${totalDraws}회차 기준)</div>
+        <div class="prob-num">${comboProb.toFixed(8)}%</div>
+        <div class="prob-label">이 번호 조합의 1등 수학적 확률 (로또 6/45 기준)</div>
       </div>
 
-      <!-- 번호별 출현 확률 -->
-      <div class="section-label" style="margin-bottom:10px">번호별 출현 확률</div>
+      <div class="section-label" style="margin-bottom:10px">번호별 과거 출현 현황</div>
       ${numProbs.map(({ n, p, count }) => `
         <div class="prob-history-item">
           <span style="display:flex;align-items:center;gap:8px">
@@ -941,39 +971,53 @@ function renderProbResult(id) {
           <span style="font-family:'Space Mono',monospace;color:var(--gold)">${p.toFixed(4)}%</span>
         </div>`).join('')}
 
-      <!-- 과거 1등 당첨 이력 -->
       <div class="divider"></div>
-      <div class="section-label">과거 1등 당첨 이력</div>
-      ${matches.length > 0
-        ? matches.map(m => `
+      <div class="section-label">과거 동일 조합 1등 이력</div>
+      ${exactMatches.length > 0
+        ? exactMatches.map(m => `
           <div class="prob-history-item">
             <span>${m.drwNoDate} · 제${m.drwNo}회</span>
-            <span class="badge badge-won">1등 당첨 🏆</span>
+            <span class="badge badge-won">동일 조합 당첨 🏆</span>
           </div>`).join('')
         : `<div style="padding:12px 0;text-align:center;color:var(--text3);font-size:13px">
-            이 번호 조합의 과거 1등 당첨 이력이 없어요
+            현재 저장된 전체 회차 기준으로 동일한 1등 조합 이력은 없어요
+           </div>`
+      }
+
+      <div class="divider"></div>
+      <div class="section-label">가장 많이 겹친 과거 회차</div>
+      ${bestRows.length > 0
+        ? bestRows.map(m => `
+          <div class="prob-history-item">
+            <span>${m.drwNoDate} · 제${m.drwNo}회</span>
+            <span style="display:flex;align-items:center;gap:6px">
+              <span class="badge" style="background:var(--surface2);border:1px solid var(--border);color:var(--text)">${m.matchCount}개 일치${m.bonusMatch ? ' + 보너스' : ''}</span>
+            </span>
+          </div>`).join('')
+        : `<div style="padding:12px 0;text-align:center;color:var(--text3);font-size:13px">
+            비교 가능한 회차 데이터가 없어요
            </div>`
       }
 
       <div style="font-size:11px;color:var(--text3);margin-top:12px;line-height:1.7">
-        ※ 출현 확률 = 해당 번호 누적 출현 횟수 ÷ 전체 회차 수<br>
-        ※ 조합 확률 = 각 번호 출현 확률의 곱<br>
-        ※ 데이터 출처: 동행복권 (1~${statsCache.latestDrwNo}회차)
+        ※ 1등 수학적 확률은 어떤 번호 조합을 고르더라도 동일합니다.<br>
+        ※ 번호별 출현율과 과거 일치 이력은 <code>data/history.json</code> 기준으로 계산합니다.<br>
+        ※ 새 회차는 GitHub Actions가 history.json을 갱신한 뒤 반영됩니다.
       </div>
     </div>`;
-  // 카드가 DOM에 추가된 후 status 동기화
   if (window._lastStatus) updateStatusUI(window._lastStatus.state, window._lastStatus.text);
 }
 
 // 불러오기 버튼 — 데이터 없을 때
+
 async function startLoadData() {
   const btn = document.getElementById('btn-load-data');
   if (btn) { btn.disabled = true; btn.textContent = '불러오는 중...'; }
   await initStatsData(true);
-  if (btn) { btn.disabled = false; btn.textContent = '🔄 data 파일 다시 불러오기'; }
   if (selectedProbId) renderProbResult(selectedProbId);
 }
 
+// 업데이트 버튼 — 이미 최신이면 안내, 아니면 로드
 async function checkAndRefresh() {
   await initStatsData(true);
   if (selectedProbId) renderProbResult(selectedProbId);
