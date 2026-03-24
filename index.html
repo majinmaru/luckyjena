@@ -126,6 +126,16 @@
   .prob-num{font-family:'Space Mono',monospace;font-size:28px;color:var(--gold);font-weight:700;text-shadow:0 0 20px rgba(245,200,66,0.3);}
   .prob-label{font-size:12px;color:var(--text3);margin-top:4px;}
   .prob-history-item{padding:10px 14px;background:var(--surface2);border-radius:10px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .algo-chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+  .algo-chip{padding:8px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-size:12px;cursor:pointer;transition:all .2s;}
+  .algo-chip.active{border-color:var(--gold);background:rgba(245,200,66,0.12);color:var(--gold);}
+  .algo-chip:hover{border-color:var(--gold);color:var(--gold);}
+  .algo-card-title{font-size:12px;color:var(--text3);margin-bottom:10px;}
+  .mini-list-row{padding:10px 14px;background:var(--surface2);border-radius:10px;margin-bottom:8px;font-size:12px;line-height:1.7;}
+  .gap-formula{font-family:'Space Mono',monospace;color:var(--gold);font-size:12px;line-height:1.8;word-break:break-word;}
+  .bar-row{display:grid;grid-template-columns:56px 1fr auto;gap:10px;align-items:center;padding:9px 0;}
+  .bar-track{height:8px;background:#0f0f17;border-radius:999px;overflow:hidden;border:1px solid var(--border);}
+  .bar-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2));border-radius:999px;}
 
   /* DATA STATUS BAR */
   .data-status{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;font-size:12px;flex-wrap:wrap;}
@@ -618,6 +628,8 @@ function saveTicket() {
 //  TICKETS LIST
 // ─────────────────────────────────────────
 let currentPage = 1, currentTicketId = null, pendingDeleteId = null, pendingDeleteMode = 'single', expandedTicketId = null;
+let selectedProbAlgo = 'freq';
+let probRecent20Expanded = false;
 const PAGE_SIZE = 10;
 
 function getSorted() {
@@ -927,6 +939,8 @@ function loadMoreDD() {
 
 // 티켓 선택
 function selectProbTicket(id) {
+  selectedProbAlgo = 'freq';
+  probRecent20Expanded = false;
   selectedProbId = id;
   const t = tickets.find(x => x.id === id);
   if (!t) return;
@@ -949,8 +963,46 @@ function selectProbTicket(id) {
 }
 
 // 확률 분석 상태 초기화
+function setProbAlgo(algo) {
+  if (!selectedProbId) return;
+  selectedProbAlgo = algo;
+  if (algo !== 'recent20') probRecent20Expanded = false;
+  renderProbResult(selectedProbId);
+}
+
+function toggleRecent20Expanded() {
+  probRecent20Expanded = !probRecent20Expanded;
+  if (selectedProbId) renderProbResult(selectedProbId);
+}
+
+function calcGapPatternStats(ticketNums, draws) {
+  const sorted = [...ticketNums].sort((a,b)=>a-b);
+  const gaps = [];
+  for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i] - sorted[i-1]);
+
+  const posMatches = gaps.map((gap, idx) => {
+    const count = draws.filter(draw => {
+      const dn = [...draw.nums].sort((a,b)=>a-b);
+      return (dn[idx+1] - dn[idx]) === gap;
+    }).length;
+    return { gap, idx, count, pct: draws.length ? (count / draws.length) * 100 : 0 };
+  });
+
+  const exactPatternCount = draws.filter(draw => {
+    const dn = [...draw.nums].sort((a,b)=>a-b);
+    const dg = [];
+    for (let i = 1; i < dn.length; i++) dg.push(dn[i] - dn[i-1]);
+    return dg.join(',') === gaps.join(',');
+  }).length;
+
+  const multipliedPct = posMatches.reduce((acc, item) => acc * (item.pct / 100), 1) * 100;
+  return { gaps, posMatches, exactPatternCount, multipliedPct };
+}
+
 function resetProbAnalysis() {
   selectedProbId = null;
+  selectedProbAlgo = 'freq';
+  probRecent20Expanded = false;
   const input = document.getElementById('prob-input');
   if (input) {
     input.value = '';
@@ -995,11 +1047,21 @@ function renderProbResult(id) {
   }
 
   const totalDraws = statsCache.totalDraws;
-  const numProbs = t.nums.map(n => {
+  const overallNumProbs = t.nums.map(n => {
     const count = Number(statsCache.freq[n] || 0);
     const p = totalDraws ? (count / totalDraws) : 0;
     return { n, p: p * 100, count };
   });
+
+  const recent20Draws = [...historyCache].sort((a,b)=>b.drwNo-a.drwNo).slice(0, 20);
+  const recent20NumProbs = t.nums.map(n => {
+    const count = recent20Draws.filter(d => d.nums.includes(n)).length;
+    const p = recent20Draws.length ? (count / recent20Draws.length) : 0;
+    return { n, p: p * 100, count };
+  });
+
+  const recent50Draws = [...historyCache].sort((a,b)=>b.drwNo-a.drwNo).slice(0, 50);
+  const gapStats = calcGapPatternStats(t.nums, recent50Draws);
 
   const exactKey = [...t.nums].sort((a,b)=>a-b).join(',');
   const exactMatches = historyCache.filter(d => d.nums.join(',') === exactKey);
@@ -1018,10 +1080,60 @@ function renderProbResult(id) {
   });
 
   const bestRows = compareRows.slice(0, 5);
-  const multipliedProb = numProbs.reduce((acc, item) => acc * (item.p / 100), 1);
-  const multipliedProbPct = multipliedProb * 100;
-  const multipliedProbText = multipliedProbPct === 0 ? '0%' : `${multipliedProbPct.toFixed(12)}%`;
-  const d = statsCache.updatedAt ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR') : '-';
+
+  const algoMap = {
+    freq: {
+      label: '전체 빈도',
+      probPct: overallNumProbs.reduce((acc, item) => acc * (item.p / 100), 1) * 100,
+      detailTitle: '번호별 과거 출현 현황',
+      detailHtml: overallNumProbs.map(({ n, p, count }) => `
+        <div class="prob-history-item">
+          <span style="display:flex;align-items:center;gap:8px">
+            <div class="mini-ball ${colorClass(n)}" style="width:24px;height:24px;font-size:13px;flex-shrink:0">${n}</div>
+            <span style="color:var(--text3);font-size:11px">(${count}회 출현)</span>
+          </span>
+          <span style="font-family:'Space Mono',monospace;color:var(--gold)">${p.toFixed(4)}%</span>
+        </div>`).join('')
+    },
+    recent20: {
+      label: '최근 20회',
+      probPct: recent20NumProbs.reduce((acc, item) => acc * (item.p / 100), 1) * 100,
+      detailTitle: '최근 20회 당첨번호 이력',
+      detailHtml: (() => {
+        const visible = probRecent20Expanded ? recent20Draws : recent20Draws.slice(0, 6);
+        const list = visible.map(draw => `
+          <div class="mini-list-row">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+              <span>${draw.drwNoDate} · 제${draw.drwNo}회</span>
+              <span style="font-family:'Space Mono',monospace;color:var(--gold)">${t.nums.filter(n => draw.nums.includes(n)).length}개 겹침</span>
+            </div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">${draw.nums.map(n => `<div class="mini-ball ${colorClass(n)}" style="width:24px;height:24px;font-size:9px">${n}</div>`).join('')} ${draw.bonusNo ? `<div style="font-size:11px;color:var(--text3);margin-left:4px;align-self:center">+ ${draw.bonusNo}</div>` : ''}</div>
+          </div>`).join('');
+        const summary = `<div class="algo-card-title">최근 20회 안에서 선택 번호가 등장한 횟수 비율을 곱해 계산해요.</div>`;
+        const expand = recent20Draws.length > 6 ? `<button class="expand-btn" onclick="toggleRecent20Expanded()">${probRecent20Expanded ? '접기' : '펼치기'} <span class="expand-icon ${probRecent20Expanded ? 'open' : ''}">▼</span></button>` : '';
+        return summary + list + expand;
+      })()
+    },
+    gap50: {
+      label: '간격 패턴',
+      probPct: gapStats.multipliedPct,
+      detailTitle: '최근 50회 번호 간 간격 분포',
+      detailHtml: (() => {
+        const formula = `<div class="mini-list-row"><div style="margin-bottom:8px;color:var(--text2)">선택 번호 간격식</div><div class="gap-formula">${[...t.nums].sort((a,b)=>a-b).join(' → ')}<br>간격: ${gapStats.gaps.join(' · ')}</div><div style="margin-top:8px;font-size:11px;color:var(--text3)">최근 50회에서 같은 위치의 간격이 나온 비율을 곱해 계산해요.</div></div>`;
+        const bars = gapStats.posMatches.map((item, idx) => `
+          <div class="bar-row">
+            <div style="font-family:'Space Mono',monospace;color:var(--text2)">Gap ${idx+1}</div>
+            <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, Math.min(100, item.pct))}%"></div></div>
+            <div style="font-family:'Space Mono',monospace;color:var(--gold);font-size:11px">${item.gap} (${item.count}회)</div>
+          </div>`).join('');
+        const exact = `<div class="mini-list-row" style="margin-top:8px">동일 간격 패턴 완전 일치: <span style="color:var(--gold);font-family:'Space Mono',monospace">${gapStats.exactPatternCount}회</span> / 최근 50회</div>`;
+        return formula + `<div class="mini-list-row">${bars}</div>` + exact;
+      })()
+    }
+  };
+
+  const currentAlgo = algoMap[selectedProbAlgo] || algoMap.freq;
+  const multipliedProbText = currentAlgo.probPct === 0 ? '0%' : `${currentAlgo.probPct.toFixed(12)}%`;
 
   area.innerHTML = `
     <div class="card">
@@ -1033,19 +1145,19 @@ function renderProbResult(id) {
         <button class="btn-load" style="padding:5px 12px;font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text3)" onclick="checkAndRefresh()">↻ 업데이트</button>
       </div>
 
-      <div class="prob-display">
-        <div class="prob-num">${multipliedProbText}</div>
+      <div class="algo-chip-row">
+        <button class="algo-chip ${selectedProbAlgo === 'freq' ? 'active' : ''}" onclick="setProbAlgo('freq')">전체 빈도</button>
+        <button class="algo-chip ${selectedProbAlgo === 'recent20' ? 'active' : ''}" onclick="setProbAlgo('recent20')">최근 20회</button>
+        <button class="algo-chip ${selectedProbAlgo === 'gap50' ? 'active' : ''}" onclick="setProbAlgo('gap50')">간격 패턴</button>
       </div>
 
-      <div class="section-label" style="margin-bottom:10px">번호별 과거 출현 현황</div>
-      ${numProbs.map(({ n, p, count }) => `
-        <div class="prob-history-item">
-          <span style="display:flex;align-items:center;gap:8px">
-            <div class="mini-ball ${colorClass(n)}" style="width:24px;height:24px;font-size:13px;flex-shrink:0">${n}</div>
-            <span style="color:var(--text3);font-size:11px">(${count}회 출현)</span>
-          </span>
-          <span style="font-family:'Space Mono',monospace;color:var(--gold)">${p.toFixed(4)}%</span>
-        </div>`).join('')}
+      <div class="prob-display">
+        <div class="prob-num">${multipliedProbText}</div>
+        <div class="prob-label">${currentAlgo.label}</div>
+      </div>
+
+      <div class="section-label" style="margin-bottom:10px">${currentAlgo.detailTitle}</div>
+      ${currentAlgo.detailHtml}
 
       <div class="divider"></div>
       <div class="section-label">이전 당첨 이력 확인</div>
