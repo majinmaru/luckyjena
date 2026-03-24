@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>행운은 내 손으로 — 로또 티켓 기록</title>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -13,6 +13,10 @@
     --radius:16px;--shadow:0 8px 32px rgba(0,0,0,0.5);
   }
   *{box-sizing:border-box;margin:0;padding:0;}
+  button,a,input,select,textarea{touch-action:manipulation;}
+  @media (max-width:768px){
+    input,select,textarea{font-size:16px !important;}
+  }
   body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif;min-height:100vh;padding-bottom:80px;}
 
   .header{background:linear-gradient(135deg,#0a0a0f 0%,#1a1020 50%,#0a0a0f 100%);border-bottom:1px solid var(--border);padding:28px 20px 20px;text-align:center;position:relative;overflow:hidden;}
@@ -940,6 +944,26 @@ function selectProbTicket(id) {
   renderProbResult(id);
 }
 
+// 확률 분석 상태 초기화
+function resetProbAnalysis() {
+  selectedProbId = null;
+  const input = document.getElementById('prob-input');
+  if (input) {
+    input.value = '';
+    input.setAttribute('readonly', true);
+  }
+  const clearBtn = document.getElementById('prob-clear');
+  if (clearBtn) clearBtn.classList.remove('visible');
+  const preview = document.getElementById('prob-selected');
+  if (preview) {
+    preview.style.display = 'none';
+    preview.innerHTML = '';
+  }
+  const area = document.getElementById('prob-result-area');
+  if (area) area.innerHTML = '';
+  closeProbDropdown();
+}
+
 // 확률 결과 렌더
 
 function renderProbResult(id) {
@@ -1014,7 +1038,7 @@ function renderProbResult(id) {
         <div class="prob-history-item">
           <span style="display:flex;align-items:center;gap:8px">
             <div class="mini-ball ${colorClass(n)}" style="width:24px;height:24px;font-size:9px;flex-shrink:0">${n}</div>
-            ${n}번 <span style="color:var(--text3);font-size:11px">(${count}회 출현)</span>
+            <span style="font-size:13px">${n}</span> <span style="color:var(--text3);font-size:11px">(${count}회 출현)</span>
           </span>
           <span style="font-family:'Space Mono',monospace;color:var(--gold)">${p.toFixed(4)}%</span>
         </div>`).join('')}
@@ -1119,6 +1143,10 @@ function miniball(n, size) {
 }
 
 function showPage(id, btn) {
+  const prevActive = document.querySelector('.page.active');
+  const prevId = prevActive ? prevActive.id : '';
+  if (prevId === 'page-prob' && id !== 'page-prob') resetProbAnalysis();
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById(id).classList.add('active');
