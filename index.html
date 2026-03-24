@@ -616,13 +616,35 @@ function getSorted() {
   const arr  = [...tickets];
   const lw   = t => t.wins.length
     ? [...t.wins].sort((a, b) => b.date.localeCompare(a.date))[0].date : '';
+  const latestPurchaseTs = t => {
+    const ds = (t.purchases || []).map(p => p.date).filter(Boolean).sort().at(-1);
+    return ds ? new Date(ds + 'T00:00:00').getTime() : 0;
+  };
+  const oldestPurchaseTs = t => {
+    const ds = (t.purchases || []).map(p => p.date).filter(Boolean).sort()[0];
+    return ds ? new Date(ds + 'T00:00:00').getTime() : 0;
+  };
+
   if      (mode === 'recent-update')    arr.sort((a, b) => (b.updatedAt||0)-(a.updatedAt||0));
-  else if (mode === 'reg-newest')       arr.sort((a, b) => (b.createdAt||0)-(a.createdAt||0));
-  else if (mode === 'reg-oldest')       arr.sort((a, b) => (a.createdAt||0)-(b.createdAt||0));
-  else if (mode === 'wins-most')        arr.sort((a, b) => { const d=b.wins.length-a.wins.length; return d||(b.createdAt||0)-(a.createdAt||0); });
-  else if (mode === 'wins-least')       arr.sort((a, b) => { const d=a.wins.length-b.wins.length; return d||(b.createdAt||0)-(a.createdAt||0); });
-  else if (mode === 'win-date-newest')  arr.sort((a, b) => { const da=lw(a),db=lw(b); if(!da&&!db) return(b.createdAt||0)-(a.createdAt||0); if(!da)return 1; if(!db)return -1; return db.localeCompare(da); });
-  else if (mode === 'win-date-oldest')  arr.sort((a, b) => { const da=lw(a),db=lw(b); if(!da&&!db) return(b.createdAt||0)-(a.createdAt||0); if(!da)return 1; if(!db)return -1; return da.localeCompare(db); });
+  else if (mode === 'reg-newest')       arr.sort((a, b) => latestPurchaseTs(b) - latestPurchaseTs(a));
+  else if (mode === 'reg-oldest')       arr.sort((a, b) => oldestPurchaseTs(a) - oldestPurchaseTs(b));
+  else if (mode === 'wins-most')        arr.sort((a, b) => {
+    const d = b.wins.length - a.wins.length;
+    return d || latestPurchaseTs(b) - latestPurchaseTs(a);
+  });
+  else if (mode === 'wins-least')       arr.sort((a, b) => {
+    const aHasWins = a.wins.length > 0;
+    const bHasWins = b.wins.length > 0;
+    if (aHasWins && bHasWins) {
+      const d = a.wins.length - b.wins.length;
+      return d || latestPurchaseTs(b) - latestPurchaseTs(a);
+    }
+    if (aHasWins && !bHasWins) return -1;
+    if (!aHasWins && bHasWins) return 1;
+    return latestPurchaseTs(b) - latestPurchaseTs(a);
+  });
+  else if (mode === 'win-date-newest')  arr.sort((a, b) => { const da=lw(a),db=lw(b); if(!da&&!db) return latestPurchaseTs(b)-latestPurchaseTs(a); if(!da)return 1; if(!db)return -1; return db.localeCompare(da); });
+  else if (mode === 'win-date-oldest')  arr.sort((a, b) => { const da=lw(a),db=lw(b); if(!da&&!db) return latestPurchaseTs(b)-latestPurchaseTs(a); if(!da)return 1; if(!db)return -1; return da.localeCompare(db); });
   return arr;
 }
 
@@ -762,7 +784,7 @@ function addWin() {
 // ─────────────────────────────────────────
 //  PROB PAGE — 드롭다운 + 무한스크롤 + 확률계산
 // ─────────────────────────────────────────
-const DD_PAGE_SIZE = 5;   // 처음 노출 개수
+const DD_PAGE_SIZE = 9999;   // 한 번에 모두 노출
 let ddOffset       = 0;   // 무한스크롤 오프셋
 let ddFiltered     = [];  // 현재 필터된 티켓 목록
 let selectedProbId = null;
@@ -848,27 +870,17 @@ function renderDropdownItems(append) {
     </div>`;
   }).join('');
 
-  const footerHtml = hasMore
-    ? `<div class="prob-dd-footer" onclick="loadMoreDD()">+ 더 보기 (${ddFiltered.length - ddOffset - DD_PAGE_SIZE}개 남음)</div>`
-    : (ddFiltered.length > DD_PAGE_SIZE ? `<div class="prob-dd-footer" style="cursor:default">총 ${ddFiltered.length}개</div>` : '');
+  const footerHtml = '';
 
   if (!append) {
     dd.innerHTML = itemsHtml + footerHtml;
   } else {
-    // 기존 footer 제거 후 아이템 추가
-    const footer = dd.querySelector('.prob-dd-footer');
-    if (footer) footer.remove();
-    dd.insertAdjacentHTML('beforeend', itemsHtml.replace(/<div class="prob-dd-item/g,
-      '<div class="prob-dd-item new-item') + footerHtml);
+    dd.innerHTML = itemsHtml + footerHtml;
   }
 }
 
 function loadMoreDD() {
-  ddOffset += DD_PAGE_SIZE;
   renderDropdownItems(false);
-  // 스크롤 유지
-  const dd = document.getElementById('prob-dropdown');
-  dd.scrollTop = dd.scrollHeight;
 }
 
 // 티켓 선택
@@ -931,9 +943,10 @@ function renderProbResult(id) {
   const exactMatches = historyCache.filter(d => d.nums.join(',') === exactKey);
 
   const compareRows = historyCache.map(draw => {
-    const matchCount = t.nums.filter(n => draw.nums.includes(n)).length;
+    const matchedNums = t.nums.filter(n => draw.nums.includes(n));
+    const matchCount = matchedNums.length;
     const bonusMatch = draw.bonusNo && t.nums.includes(draw.bonusNo);
-    return { ...draw, matchCount, bonusMatch };
+    return { ...draw, matchCount, bonusMatch, matchedNums };
   }).filter(r => r.matchCount > 0);
 
   compareRows.sort((a, b) => {
@@ -946,7 +959,6 @@ function renderProbResult(id) {
   const multipliedProb = numProbs.reduce((acc, item) => acc * (item.p / 100), 1);
   const multipliedProbPct = multipliedProb * 100;
   const multipliedProbText = multipliedProbPct === 0 ? '0%' : `${multipliedProbPct.toFixed(12)}%`;
-  const mathFirstProb = ((1 / 8145060) * 100).toFixed(8);
   const d = statsCache.updatedAt ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR') : '-';
 
   area.innerHTML = `
@@ -961,8 +973,6 @@ function renderProbResult(id) {
 
       <div class="prob-display">
         <div class="prob-num">${multipliedProbText}</div>
-        <div class="prob-label">번호별 과거 출현 퍼센티지를 각각 곱한 값</div>
-        <div style="margin-top:10px;font-size:11px;color:var(--text3)">참고: 로또 6/45의 1등 수학적 확률은 조합과 무관하게 ${mathFirstProb}</div>
       </div>
 
       <div class="section-label" style="margin-bottom:10px">번호별 과거 출현 현황</div>
@@ -992,22 +1002,22 @@ function renderProbResult(id) {
       <div class="section-label">가장 많이 겹친 과거 회차 (참고)</div>
       ${bestRows.length > 0
         ? bestRows.map(m => `
-          <div class="prob-history-item">
-            <span>${m.drwNoDate} · 제${m.drwNo}회</span>
-            <span style="display:flex;align-items:center;gap:6px">
+          <div class="prob-history-item" style="display:block">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+              <span>${m.drwNoDate} · 제${m.drwNo}회</span>
               <span class="badge" style="background:var(--surface2);border:1px solid var(--border);color:var(--text)">${m.matchCount}개 일치${m.bonusMatch ? ' + 보너스' : ''}</span>
-            </span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);line-height:1.7">
+              당첨번호 전체: ${m.nums.join(', ')}${m.bonusNo ? ` + 보너스 ${m.bonusNo}` : ''}
+            </div>
+            <div style="font-size:12px;color:var(--gold);margin-top:4px;line-height:1.7">
+              겹친 번호: ${m.matchedNums.join(', ')}${m.bonusMatch ? ` · 보너스 일치 ${m.bonusNo}` : ''}
+            </div>
           </div>`).join('')
         : `<div style="padding:12px 0;text-align:center;color:var(--text3);font-size:13px">
             비교 가능한 회차 데이터가 없어요
            </div>`
       }
-
-      <div style="font-size:11px;color:var(--text3);margin-top:12px;line-height:1.7">
-        ※ 큰 숫자는 각 번호의 과거 출현 퍼센티지를 곱한 값입니다.<br>
-        ※ 번호별 출현율과 이전 당첨 이력은 <code>data/history.json</code> 기준으로 계산합니다.<br>
-        ※ 새 회차는 GitHub Actions가 history.json을 갱신한 뒤 반영됩니다.
-      </div>
     </div>`;
   if (window._lastStatus) updateStatusUI(window._lastStatus.state, window._lastStatus.text);
 }
@@ -1021,10 +1031,44 @@ async function startLoadData() {
   if (selectedProbId) renderProbResult(selectedProbId);
 }
 
+function getExpectedLatestDrawKST() {
+  const firstDrawUtc = Date.UTC(2002, 11, 7, 11, 40, 0);
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const day = kst.getUTCDay();
+  const hour = kst.getUTCHours();
+  const minute = kst.getUTCMinutes();
+  const drawDone = day !== 6 || hour > 20 || (hour === 20 && minute >= 50);
+  const weeks = Math.floor((kst.getTime() - firstDrawUtc) / (7 * 24 * 60 * 60 * 1000));
+  return drawDone ? weeks + 1 : weeks;
+}
+function getCurrentKstLabel() {
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 // 업데이트 버튼 — 이미 최신이면 안내, 아니면 로드
 async function checkAndRefresh() {
+  const expectedLatest = getExpectedLatestDrawKST();
+  const currentLatest = Number(statsCache.latestDrwNo || 0);
+
+  if (currentLatest >= expectedLatest) {
+    showToast(`이미 한국시간 기준 이번 토요일 최신 데이터(${currentLatest}회차)까지 있어요. 다시 불러올 필요가 없어요.`);
+    updateStatusUI('ok', `${currentLatest}회차 기준 · 한국시간 ${getCurrentKstLabel()} 확인 · 추가 불러오기 불필요`);
+    return;
+  }
+
+  const beforeLatest = currentLatest;
   await initStatsData(true);
   if (selectedProbId) renderProbResult(selectedProbId);
+
+  const afterLatest = Number(statsCache.latestDrwNo || 0);
+  if (afterLatest <= beforeLatest) {
+    showToast('아직 이번 토요일 기준으로 추가된 최신 data 파일이 없어요. 나중에 다시 확인해 주세요.');
+  }
 }
 // ─────────────────────────────────────────
 //  UTILS
