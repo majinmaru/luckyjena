@@ -1,15 +1,31 @@
-# Lotto GitHub Pages 버전
+# Lotto GitHub Pages 작동 버전
 
-이 프로젝트는 Netlify Functions 없이 GitHub Pages에서 동작하도록 바꾼 버전입니다.
+이 버전은 GitHub Pages에서 바로 돌아가도록 **실제 회차 데이터가 이미 포함된 상태**로 만들어졌습니다.
+
+## 핵심 방식
+
+- 사이트는 `data/history.json`, `data/stats.json`, `data/latest.json`만 읽습니다.
+- 확률분석 탭에서는 저장한 티켓 1개를 골라:
+  - 각 번호의 과거 출현 퍼센티지를 표시하고
+  - 그 6개 퍼센티지를 서로 곱한 값을 조합 점수처럼 보여주고
+  - 과거에 **동일한 6개 조합**이 당첨된 회차가 있는지 확인합니다.
+- 티켓을 조회할 때마다 전체 회차를 다시 불러오지 않습니다.
+- 로컬 캐시(`localStorage`)도 사용해서 두 번째부터는 더 빠릅니다.
+
+## 현재 포함 데이터
+
+- 최신 반영 회차: 1216회
+- 전체 회차 수: 1216회
+- 최신 추첨일: 2026-03-21
 
 ## 폴더 구조
 
 ```text
 index.html
 data/
-  latest.json
   history.json
   stats.json
+  latest.json
 scripts/
   build-data.js
 .github/
@@ -17,29 +33,37 @@ scripts/
     update-lotto-data.yml
 ```
 
-## 핵심 동작 방식
+## GitHub에 올릴 때
 
-- 브라우저는 `data/history.json`, `data/stats.json`, `data/latest.json`만 읽습니다.
-- `scripts/build-data.js`가 동행복권 회차 데이터를 받아 JSON 파일을 생성합니다.
-- GitHub Actions가 매주 자동으로 data 파일을 갱신합니다.
-- 확률분석 탭의 `data 파일 다시 불러오기` 버튼은 저장소에 올라온 최신 JSON을 다시 읽습니다.
+압축파일을 풀고, **안의 내용물**을 저장소 루트에 올리세요.
 
-## 처음 올린 뒤 해야 할 일
+정상 구조:
 
-1. 저장소에 이 파일들을 그대로 업로드합니다.
-2. `Actions` 탭에서 `Update lotto data` 워크플로를 수동 실행합니다.
-3. 실행이 끝나면 `data/history.json`, `data/stats.json`, `data/latest.json`이 실제 데이터로 채워집니다.
-4. GitHub Pages에서 사이트를 새로고침하고 `data 파일 다시 불러오기` 버튼을 누릅니다.
+```text
+index.html
+data/
+scripts/
+.github/
+package.json
+README.md
+```
 
 ## Pages 설정
 
 - Settings → Pages
-- Source: `Deploy from a branch`
+- Source: Deploy from a branch
 - Branch: `main`
 - Folder: `/(root)`
 
-## 주의
+## 데이터 업데이트
 
-- 동행복권 회차 데이터는 GitHub Actions가 먼저 생성해야 합니다.
-- 처음 업로드 직후에는 `data/*.json`이 비어 있을 수 있습니다.
-- 새 회차를 당겨오고 싶으면 Actions에서 `Update lotto data`를 다시 실행하면 됩니다.
+이미 데이터가 들어 있으므로 처음부터 분석이 됩니다.
+
+새 회차를 반영하고 싶으면:
+1. Actions 탭으로 이동
+2. `Update lotto data` 실행
+3. 사이트에서 `data 다시 불러오기` 클릭
+
+## 참고
+
+업데이트 스크립트는 GitHub에서 접근 가능한 공개 JSON 미러를 사용합니다.

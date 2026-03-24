@@ -179,7 +179,7 @@
 <div class="load-overlay hidden" id="load-overlay">
   <div class="load-spinner"></div>
   <div class="load-progress" id="load-progress"></div>
-  <div class="load-text" id="load-text">동행복권 데이터를 불러오는 중이에요<br>처음 한 번만 시간이 걸려요</div>
+  <div class="load-text" id="load-text">분석용 데이터를 불러오는 중이에요<br>처음 한 번만 잠깐 기다려 주세요</div>
 </div>
 
 <div class="header">
@@ -943,7 +943,10 @@ function renderProbResult(id) {
   });
 
   const bestRows = compareRows.slice(0, 5);
-  const comboProb = (1 / 8145060) * 100;
+  const multipliedProb = numProbs.reduce((acc, item) => acc * (item.p / 100), 1);
+  const multipliedProbPct = multipliedProb * 100;
+  const multipliedProbText = multipliedProbPct === 0 ? '0%' : `${multipliedProbPct.toFixed(12)}%`;
+  const mathFirstProb = ((1 / 8145060) * 100).toFixed(8);
   const d = statsCache.updatedAt ? new Date(statsCache.updatedAt).toLocaleDateString('ko-KR') : '-';
 
   area.innerHTML = `
@@ -957,8 +960,9 @@ function renderProbResult(id) {
       </div>
 
       <div class="prob-display">
-        <div class="prob-num">${comboProb.toFixed(8)}%</div>
-        <div class="prob-label">이 번호 조합의 1등 수학적 확률 (로또 6/45 기준)</div>
+        <div class="prob-num">${multipliedProbText}</div>
+        <div class="prob-label">번호별 과거 출현 퍼센티지를 각각 곱한 값</div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text3)">참고: 로또 6/45의 1등 수학적 확률은 조합과 무관하게 ${mathFirstProb}</div>
       </div>
 
       <div class="section-label" style="margin-bottom:10px">번호별 과거 출현 현황</div>
@@ -972,20 +976,20 @@ function renderProbResult(id) {
         </div>`).join('')}
 
       <div class="divider"></div>
-      <div class="section-label">과거 동일 조합 1등 이력</div>
+      <div class="section-label">이전 당첨 이력 확인</div>
       ${exactMatches.length > 0
         ? exactMatches.map(m => `
           <div class="prob-history-item">
             <span>${m.drwNoDate} · 제${m.drwNo}회</span>
-            <span class="badge badge-won">동일 조합 당첨 🏆</span>
+            <span class="badge badge-won">같은 번호 조합</span>
           </div>`).join('')
         : `<div style="padding:12px 0;text-align:center;color:var(--text3);font-size:13px">
-            현재 저장된 전체 회차 기준으로 동일한 1등 조합 이력은 없어요
+            현재 저장된 전체 회차 기준으로 동일한 번호 조합 당첨 이력은 없어요
            </div>`
       }
 
       <div class="divider"></div>
-      <div class="section-label">가장 많이 겹친 과거 회차</div>
+      <div class="section-label">가장 많이 겹친 과거 회차 (참고)</div>
       ${bestRows.length > 0
         ? bestRows.map(m => `
           <div class="prob-history-item">
@@ -1000,8 +1004,8 @@ function renderProbResult(id) {
       }
 
       <div style="font-size:11px;color:var(--text3);margin-top:12px;line-height:1.7">
-        ※ 1등 수학적 확률은 어떤 번호 조합을 고르더라도 동일합니다.<br>
-        ※ 번호별 출현율과 과거 일치 이력은 <code>data/history.json</code> 기준으로 계산합니다.<br>
+        ※ 큰 숫자는 각 번호의 과거 출현 퍼센티지를 곱한 값입니다.<br>
+        ※ 번호별 출현율과 이전 당첨 이력은 <code>data/history.json</code> 기준으로 계산합니다.<br>
         ※ 새 회차는 GitHub Actions가 history.json을 갱신한 뒤 반영됩니다.
       </div>
     </div>`;
