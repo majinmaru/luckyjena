@@ -570,6 +570,7 @@ function clearSelection() {
 }
 
 function randomPick() {
+  if (selectedNums.length === 0) { showToast('번호를 1개 이상 먼저 선택해주세요'); return; }
   const needed = 6 - selectedNums.length;
   if (needed === 0) { showToast('이미 6개가 모두 선택됐어요'); return; }
   const pool = [];
@@ -583,7 +584,7 @@ function randomPick() {
     document.getElementById('b' + n).className = 'ball selected';
   });
   renderSelectedRow();
-  showToast(needed === 6 ? '🎲 랜덤 번호 6개 선택!' : `🎲 ${needed}개 번호를 추가로 선택했어요!`);
+  showToast(`🎲 ${needed}개 번호를 추천했어요!`);
 }
 
 // ─────────────────────────────────────────
