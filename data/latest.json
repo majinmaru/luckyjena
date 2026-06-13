@@ -1,17 +1,17 @@
 {
-  "latestDrwNo": 1227,
-  "updatedAt": "2026-06-06T15:42:49.733Z",
+  "latestDrwNo": 1228,
+  "updatedAt": "2026-06-13T15:51:32.885Z",
   "latestDraw": {
-    "drwNo": 1227,
-    "drwNoDate": "2026-06-06",
+    "drwNo": 1228,
+    "drwNoDate": "2026-06-13",
     "nums": [
-      1,
-      14,
-      16,
-      34,
-      41,
+      24,
+      29,
+      30,
+      31,
+      35,
       44
     ],
-    "bonusNo": 13
+    "bonusNo": 1
   }
 }
