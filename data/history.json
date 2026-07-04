@@ -1,7 +1,7 @@
 {
-  "latestDrwNo": 1230,
-  "totalDraws": 1230,
-  "updatedAt": "2026-06-27T15:40:31.883Z",
+  "latestDrwNo": 1231,
+  "totalDraws": 1231,
+  "updatedAt": "2026-07-04T15:33:43.656Z",
   "draws": [
     {
       "drwNo": 1,
@@ -15992,6 +15992,19 @@
         42
       ],
       "bonusNo": 45
+    },
+    {
+      "drwNo": 1231,
+      "drwNoDate": "2026-07-04",
+      "nums": [
+        4,
+        13,
+        14,
+        18,
+        31,
+        38
+      ],
+      "bonusNo": 15
     }
   ]
 }
